@@ -80,7 +80,7 @@ public:
   }
   node* run(int iterations=1000)
   {
-    int it = 1;
+    int it = 0;
     while(it < iterations){
       node* cur = selection();
       cur = expansion(cur);
@@ -338,11 +338,17 @@ int main(int argc, char**argv){
     else{
       std::cout<<"Draw!\n";
     }
-    std::cout<<"enter anything to start new game, press x to exit game!\n";
+    std::cout<<"1. press c to change  Difficulty \n";
+    std::cout<<"2. press x to exit game!\n";
+    std::cout<<"3. anything else to continue\n";
     char op;
     std::cin>>op;
     if(op=='x')
       break;
+    else if(op=='c'){
+      std::cout<<"enter Difficulty number larger than 1, for example:1000\n";
+      std::cin >> iteration;
+    }
   }
   return 0;
 }
