@@ -256,7 +256,7 @@ std::string userPlay(std::string state, char player){
   bool readInput = false;
   while(!readInput){
     int x;
-    std::cout<<"enter position 1~9\n";
+    std::cout<<"\nplease enter position 1~9\n";
     std::cin >> x ;
     if(x<1 || x>9)
       std::cout<<"wrong position\n";
@@ -264,7 +264,7 @@ std::string userPlay(std::string state, char player){
       std::cout<<"non empty pos\n";
     }
     else{
-      std::cout<<"Human stage\n";
+      std::cout<<"\nHuman stage\n";
       readInput = true;
       state[x-1] = player;
     }
@@ -290,6 +290,11 @@ int main(int argc, char**argv){
     std::cout<<"choose player O or X\n";
     char userPlayer;
     std::cin >> userPlayer;
+    if(userPlayer != 'O' && userPlayer !='X')
+    {
+      std::cerr<<"error player\n";
+      exit(1);
+    }
 
     if(userPlayer == 'O'){
       while(!game.isEnd()){
@@ -297,6 +302,7 @@ int main(int argc, char**argv){
         show(state);
         game.refresh(state);
         if(!game.isEnd()){
+          std::cout<<"\nAI stage\n";
           state = mcts(state, userPlayer).run(iteration)->state;
           show(state);
           game.refresh(state);
@@ -305,6 +311,7 @@ int main(int argc, char**argv){
     }
     else{
       while(!game.isEnd()){
+        std::cout<<"\nAI stage\n";
         state = mcts(state, userPlayer).run(iteration)->state;
         show(state);
         game.refresh(state);
