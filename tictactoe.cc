@@ -5,14 +5,14 @@
 #include <limits>
 #include <math.h>
 #include <iomanip>
+#include <cassert>
 
 
 struct node{
   std::string state; //O--X-----
   std::vector<std::unique_ptr<node>>children;
-  float val;
-  int vist;
-  float uct;
+  double val;
+  int visit;
   char player;
   node* parent;
   node(std::string s, node*p=nullptr, char play='O')
@@ -21,16 +21,15 @@ struct node{
     parent{p},
     player{play},
     val{0},
-    vist{0},
-    uct{std::numeric_limits<float>::max()}
+    visit{0}
   {}
   void addChild(std::string nextState, char nextPlayer){
     children.push_back(std::make_unique<node>(nextState, this, nextPlayer));
   }
-  node* getLargest();
-  bool isLeaf()const{return children.size()==0;}
+  bool isLeaf()const{
+    return children.size() == 0;
+  }
 };
-
 
 
 
@@ -45,83 +44,78 @@ void show(std::string state){
 }
 
 
+// uct = vi / ni + C * sqrt(ln(Ni) / ni), Ni = #visits of parent
+double caculateUCT(node* cur)
+{
+  double C = 1.416;
+  if(cur->visit == 0)
+    return std::numeric_limits<double>::max();
+  double uct = (cur->val / cur->visit);
+  if(cur->parent->visit != 0){
+    uct += C * sqrt(log(cur->parent->visit)/(cur->visit));
+  }
+  return uct;
+}
+
+// return the child with largest uct value
+node* getBestUctChild(node* cur){
+  node* bestChild = nullptr;
+  double maxUCT = std::numeric_limits<double>::lowest();
+  for(auto& child:cur->children){
+    double uct = caculateUCT(child.get());
+    if(uct > maxUCT){
+      maxUCT =  uct;
+      bestChild = child.get();
+    }
+  }
+  return bestChild;
+}
+
 class mcts{
 
 public:
-  mcts(std::string state)
-    :top{std::make_unique<node>(state, nullptr, 'O')}
+  mcts(std::string state, char userPlayer='O')
+    :top{std::make_unique<node>(state, nullptr, userPlayer)}
   {
   }
   node* run(int iterations=1000)
   {
     int it = 1;
     while(it < iterations){
-      node* cur = selection(it);
+      node* cur = selection();
       cur = expansion(cur);
       char result = rollout(cur);
-      backpropagation(cur, result, it);
+      backpropagation(cur, result);
       it++;
     }
 //    for(auto &child:top->children){
 //      show(child->state);
 //      std::cout<<"val:"<<child->val<<"  ";
-//      std::cout<<"vst:"<<child->vist<<"  ";
+//      std::cout<<"vst:"<<child->visit<<"  ";
 //      std::cout<<"uct:"<<child->uct<<"\n";
 //    }
-    return top->getLargest();
+
+    node* child = getBestUctChild(top.get());
+    assert(child != nullptr && "state is already end");
+    return child;
   }
   node* getTop(){return top.get();}
 private:
-  void updateUCT(node*cur, int iter);
   std::unique_ptr<node>top;
-  node* selection(int);
+  node* selection();
   node* expansion(node*cur);
   char rollout(node*cur);// 'D':draw, 'O','X'
-  void backpropagation(node*cur, char result, int totalIter);
+  void backpropagation(node*cur, char result);
 };
 
-void mcts::updateUCT(node*cur, int iter){
-  if(cur->vist!=0){
-    cur->uct = (cur->val / cur->vist);
-    if(cur->parent->vist != 0){
-      cur->uct += 1.416 * sqrt(log(float(cur->parent->vist))/(cur->vist));
-    }
-  }
-}
 
-node* node::getLargest(){
-  node*best = children.front().get();
-  for(auto &child:children){
-    if(child->uct > best->uct){
-      best = child.get();
-    }
-  }
-  return best;
-}
-
-auto mcts::selection(int iter) -> node*
+// selection best uct from top.
+auto mcts::selection() -> node*
 {
   node* cur = top.get();
   while(!cur->isLeaf()){ 
-    float maxuct = std::numeric_limits<float>::min();
-    int bestChildId = 0;
-    for(int id = 0; id < cur->children.size(); ++id){
-      updateUCT(cur->children[id].get(),iter);
-      node* child = cur->children[id].get();
-//      show(child->state);
-//      std::cout<<"val:"<<child->val<<"  ";
-//      std::cout<<"vst:"<<child->vist<<"  ";
-//      std::cout<<"uct:"<<child->uct<<"\n";
-      if(cur->children[id]->uct > maxuct){
-        maxuct = cur->children[id]->uct;
-        bestChildId = id;
-      }
-    }
-    cur = cur->children[bestChildId].get();
+    cur = getBestUctChild(cur);
   }
-  //int opt;
-  //std::cout<<"------------------------------\n";
-  //std::cin>>opt;
   return cur;
 }
 
@@ -145,6 +139,7 @@ bool isWin(char player, std::string state){
   return false;
 }
 
+
 std::vector<int> findEmptyPos(std::string state)
 {
   std::vector<int>emptyPosition;
@@ -155,36 +150,52 @@ std::vector<int> findEmptyPos(std::string state)
   return emptyPosition;
 }
 
+struct gameState{ 
+  bool Owin;
+  bool Xwin;
+  std::vector<int>emptyPosition;
+  gameState(std::string state)
+    :
+      Owin{isWin('O', state)},
+      Xwin{isWin('X', state)},
+      emptyPosition{findEmptyPos(state)}
+  {
+
+  }
+  bool isEnd(){
+    return Owin || Xwin || emptyPosition.size()==0;
+  }
+  void refresh(std::string state){
+    Owin = isWin('O', state);
+    Xwin = isWin('X', state);
+    emptyPosition = findEmptyPos(state);
+
+  }
+};
+
+// return itself if visit = 0, otherwise do expansion and return it's child
 auto mcts::expansion(node*cur) -> node*
 {
 
+  gameState game(cur->state);
+
   //do expansion
-  if(cur->vist != 0 || cur == top.get()){
-    char nextPlayer;
-    if(cur->player=='O')
-      nextPlayer = 'X'; 
-    else
-      nextPlayer = 'O'; 
+  if(!game.isEnd() && (cur->visit != 0 || cur == top.get())){
 
-    std::vector<int>emptyPosition = findEmptyPos(cur->state);
-    // game end 
-    if(emptyPosition.size()==0 || isWin(cur->player, cur->state) || isWin(nextPlayer, cur->state))
-      return cur;
+    assert(cur->children.size()==0 && "already expanded");
 
-    for(int i = 0; i < emptyPosition.size(); i++){
-      int pos = emptyPosition[i];
+    char nextPlayer = (cur->player == 'O') ? 'X' : 'O';
+
+    for(int i = 0; i < game.emptyPosition.size(); i++){
+      int pos = game.emptyPosition[i];
       std::string nextState = cur->state;
-      nextState[pos] = nextPlayer;//update
+      nextState[pos] = nextPlayer; //update board state
       cur->addChild(nextState, nextPlayer);
     }
-
     cur = cur->children[0].get();
   }
   return cur;
 }
-
-
-
 
 
 int randomPick(std::vector<int>&emptyPos)
@@ -192,45 +203,38 @@ int randomPick(std::vector<int>&emptyPos)
   return emptyPos[rand() % emptyPos.size()];
 }
 
+// return the game result from this current node by ramdom actions.
 char mcts::rollout(node*cur)
 {
   std::string state = cur->state;
-  char playerNow = cur->player;
+  char lastPlayer = cur->player;
 
-  bool O_isWin = isWin('O', state);
-  bool X_isWin = isWin('X', state);
-  std::vector<int>emptyPosition = findEmptyPos(cur->state);
+  gameState game(state);
 
-  int i = 0;
   //not terminate
-  while(!O_isWin && !X_isWin && emptyPosition.size()!=0)
+  while(!game.isEnd())
   {
-    //update state
-    char player;
-    if(playerNow == 'O')
-      player = 'X';
-    else
-      player = 'O';
-
-    //find an empry posistion randomly.
-    state[randomPick(emptyPosition)] = player;
-    playerNow = player;
-
-    O_isWin = isWin('O', state);
-    X_isWin = isWin('X', state);
-    emptyPosition = findEmptyPos(state);
+    // update state
+    char player = (lastPlayer == 'O') ? 'X' : 'O';
+    // find an empry posistion randomly.
+    state[randomPick(game.emptyPosition)] = player;
+    // update player
+    lastPlayer = player;
+    // update game state
+    game.refresh(state);
   }
 
-  if(O_isWin)
+  if(game.Owin)
     return 'O';
-  else if(X_isWin)
+  else if(game.Xwin)
     return 'X';
   else
     return 'D';
 }
 
 
-void mcts::backpropagation(node*cur, char result, int totalIter)
+// update node->visit and val according to game result
+void mcts::backpropagation(node*cur, char result)
 { 
   while(cur != nullptr){ 
 
@@ -242,64 +246,87 @@ void mcts::backpropagation(node*cur, char result, int totalIter)
         cur->val--;
       }
     }
-    cur->vist++;
+    cur->visit++;
     cur = cur -> parent;
   }
 }
 
 
+std::string userPlay(std::string state, char player){
+  bool readInput = false;
+  while(!readInput){
+    int x;
+    std::cout<<"enter position 1~9\n";
+    std::cin >> x ;
+    if(x<1 || x>9)
+      std::cout<<"wrong position\n";
+    else if(state[x-1] != '-'){
+      std::cout<<"non empty pos\n";
+    }
+    else{
+      std::cout<<"Human stage\n";
+      readInput = true;
+      state[x-1] = player;
+    }
+  }
+  return state;
+}
+
+
 int main(int argc, char**argv){
   
-  int iteration = 1000;
+  int iteration = 5000;
+
   if(argc==2){
     iteration = std::stoi(argv[1]);
   }
 
-  bool endGame = false;
-  while(!endGame){
+  while(1){
     std::cout<<"start a new game\n";
     std::string state = "---------";
-    bool O_isWin = false;
-    bool X_isWin = false;
-    std::vector<int>emptyPosition = findEmptyPos(state);
+    gameState game(state);
+    srand(time(0));
 
-    while(!O_isWin && !X_isWin && emptyPosition.size()!=0)
-    {
-      bool readInput = false;
-      while(!readInput){
-        int x,y;
-        std::cout<<"enter position\n";
-        std::cin >> x >> y;
-        if(x<0 || x>2 || y<0 ||y>2)
-          std::cout<<"wrong position\n";
-        else if(state[y*3+x] != '-'){
-          std::cout<<"non empty pos\n";
-        }
-        else{
-          std::cout<<"Human stage\n";
-          readInput = true;
-          state[y*3+x] = 'O';
-          show(state);
-        }
-      }
-      O_isWin = isWin('O', state);
-      X_isWin = isWin('X', state);
-      emptyPosition = findEmptyPos(state);
-      if(!O_isWin && !X_isWin && emptyPosition.size()!=0){
-        std::cout<<"Machine stage\n";
-        mcts solver(state);
-        state = solver.run(iteration)->state;
+    std::cout<<"choose player O or X\n";
+    char userPlayer;
+    std::cin >> userPlayer;
+
+    if(userPlayer == 'O'){
+      while(!game.isEnd()){
+        state = userPlay(state, userPlayer);
         show(state);
-        O_isWin = isWin('O', state);
-        X_isWin = isWin('X', state);
-        emptyPosition = findEmptyPos(state);
+        game.refresh(state);
+        if(!game.isEnd()){
+          state = mcts(state, userPlayer).run(iteration)->state;
+          show(state);
+          game.refresh(state);
+        }
       }
     }
-    if(O_isWin){
-      std::cout<<"Human win!\n";
+    else{
+      while(!game.isEnd()){
+        state = mcts(state, userPlayer).run(iteration)->state;
+        show(state);
+        game.refresh(state);
+        if(!game.isEnd()){
+          state = userPlay(state, userPlayer);
+          show(state);
+          game.refresh(state);
+        }
+      }
     }
-    else if(X_isWin){
-      std::cout<<"AI win!\n";
+
+    if(game.Owin){ 
+      if(userPlayer == 'O')
+        std::cout<<"Human win!\n";
+      else
+        std::cout<<"AI win!\n";
+    }
+    else if(game.Xwin){
+      if(userPlayer == 'X')
+        std::cout<<"Human win!\n";
+      else
+        std::cout<<"AI win!\n";
     }
     else{
       std::cout<<"Draw!\n";
